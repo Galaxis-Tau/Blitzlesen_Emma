@@ -1,0 +1,1012 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Blitzlesen – Emma</title>
+
+  <!-- Tailwind (Play CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- React + ReactDOM (UMD) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+
+  <!-- Babel: transpiliert das JSX unten im Browser -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+
+  <!-- Schriften für den Handschrift-Modus -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Comic+Neue:wght@400;700&display=swap" rel="stylesheet" />
+
+  <style>
+    html, body { margin: 0; padding: 0; }
+
+    /* Von der Komponente genutzte, aber nicht in Tailwind enthaltene Animation */
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: none; }
+    }
+    .animate-fadeIn { animation: fadeIn 0.35s ease-out both; }
+
+    /* shadow-xs wird von der Komponente verwendet (in älteren Tailwind-Versionen nicht vorhanden) */
+    .shadow-xs { box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="react">
+    const { useState, useEffect, useRef, useMemo } = React;
+
+    // =====================================================================
+    // STANDARD WORTLISTE (Top 100 deutsche Grundwortschatz-Wörter)
+    // =====================================================================
+    const DEFAULT_WORDS = [
+      'die', 'und', 'ich', 'der', 'sie', 'er', 'ein', 'war', 'es', 'das',
+      'da', 'in', 'wir', 'den', 'ist', 'auf', 'mit', 'nicht', 'hat', 'eine',
+      'zu', 'dann', 'einen', 'aber', 'einmal', 'sagte', 'haben', 'als', 'dem', 'sich',
+      'im', 'habe', 'hatte', 'du', 'nach', 'am', 'kam', 'an', 'sind', 'ans',
+      'dass', 'wieder', 'ging', 'waren', 'so', 'auch', 'Mutter', 'noch', 'meine', 'von',
+      'vom', 'mir', 'zum', 'sehr', 'bin', 'einem', 'wie', 'ja', 'ihn', 'wenn',
+      'jetzt', 'ihr', 'ganz', 'wollte', 'ins', 'mein', 'mich', 'doch', 'Hause', 'immer',
+      'sah', 'Vater', 'eines', 'lag', 'uns', 'schon', 'Haus', 'mehr', 'vor', 'bei',
+      'man', 'weil', 'Schule', 'um', 'will', 'kleine', 'denn', 'Mann', 'Katze', 'geht',
+      'Hund', 'alle', 'sagt', 'konnte', 'Frau', 'Weg', 'einer', 'sein', 'gehen', 'kann'
+    ].join('\n');
+
+    // Die 100er-Liste in fünf gleich große Teile (je 20 Wörter) zerlegen
+    const TOP100_WORDS = DEFAULT_WORDS.split('\n');
+    const chunkWords = (arr, size) =>
+      Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
+        arr.slice(i * size, i * size + size)
+      );
+    const TOP100_CHUNKS = chunkWords(TOP100_WORDS, 20);
+
+    // Themen-Wortlisten (kurze, gut lesbare Wörter für die 1. Klasse)
+    const THEME_LISTS = [
+      {
+        id: 'superhelden',
+        label: 'Superhelden',
+        text: 'Held\nMaske\nKraft\nBlitz\nNetz\nSpinne\nKostüm\nUmhang\nretten\nfliegen\nstark\nmutig\nschnell\nFeind\nGefahr\nStadt\nTurm\nSieg\nTeam\nHilfe',
+      },
+      {
+        id: 'pawpatrol',
+        label: 'Paw Patrol',
+        text: 'Hund\nPfote\nTeam\nRyder\nChase\nMarshall\nRubble\nSkye\nZuma\nRocky\nTurm\nAuto\nLeiter\nHelm\nEinsatz\nRettung\nhelfen\nbellen\nmutig\nlos',
+      },
+      {
+        id: 'maus',
+        label: 'Sendung mit der Maus',
+        text: 'Maus\nElefant\nEnte\nblau\norange\nLachen\nSachen\nFrage\nAntwort\nzeigen\nbauen\nTrick\nFilm\nMusik\nPause\nklein\ngroß\nlustig\nklug\nheute',
+      },
+      {
+        id: 'bluey',
+        label: 'Bluey & Bingo',
+        text: 'Bluey\nBingo\nMama\nPapa\nHund\nspielen\nSpiel\nGarten\nBall\nlachen\nrennen\nRegel\nFamilie\nIdee\nSpaß\ndraußen\nAbend\nHund\nfangen\ngleich',
+      },
+    ];
+
+    // Preset-Listen zur schnellen Auswahl
+    const PRESETS = [
+      { id: 'top100', label: 'Top 100 (alle)', text: DEFAULT_WORDS },
+      ...TOP100_CHUNKS.map((chunk, i) => ({
+        id: `top100_${i + 1}`,
+        label: `Teil ${i + 1} (${i * 20 + 1}–${i * 20 + chunk.length})`,
+        text: chunk.join('\n'),
+      })),
+      { id: 'starter', label: 'Leichte Starter-Wörter', text: 'Mama\nPapa\nOma\nOpa\nAuto\nBall\nHaus\nBaum\nKamm\nKatze\nHund\nSonne\nMond\nBuch\nBoot' },
+      { id: 'tierhelden', label: 'Tiere & Natur', text: 'Hund\nKatze\nMaus\nPferd\nIgel\nFuchs\nVogel\nFisch\nWald\nBaum\nBlume\nWiese\nStern\nWolke\nBlitz' },
+      ...THEME_LISTS,
+    ];
+
+    // Gesamter Wort-Pool für den Zufalls-Mix (dedupliziert, ohne die volle 100er-Liste)
+    const ALL_WORDS_POOL = Array.from(
+      new Set(
+        PRESETS.filter((p) => p.id !== 'top100')
+          .flatMap((p) => p.text.split('\n'))
+          .map((w) => w.trim())
+          .filter(Boolean)
+      )
+    );
+
+    // n zufällige Wörter aus einem Array ziehen (Fisher-Yates)
+    const pickRandom = (arr, n) => {
+      const copy = [...arr];
+      for (let i = copy.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy.slice(0, n);
+    };
+
+    // =====================================================================
+    // MASCOT-ICONS & AVATARE (Bluey, Spidey, Paw Patrol, Einhorn, Maus)
+    // =====================================================================
+    const MASCOTS = [
+      {
+        id: 'maus',
+        name: 'Die Maus',
+        tagline: 'Lach- und Sachgeschichten',
+        color: 'from-amber-400 to-orange-500',
+        bgColor: 'bg-amber-100 text-amber-800 border-amber-300',
+        renderIcon: () => (
+          <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-sm">
+            {/* Große Ohren */}
+            <circle cx="28" cy="28" r="22" fill="#84532B" />
+            <circle cx="28" cy="28" r="16" fill="#F4A261" />
+            <circle cx="72" cy="28" r="22" fill="#84532B" />
+            <circle cx="72" cy="28" r="16" fill="#F4A261" />
+            {/* Kopf */}
+            <ellipse cx="50" cy="58" rx="34" ry="30" fill="#E76F10" />
+            {/* Augen */}
+            <ellipse cx="38" cy="50" rx="9" ry="13" fill="#FFFFFF" />
+            <ellipse cx="62" cy="50" rx="9" ry="13" fill="#FFFFFF" />
+            <circle cx="41" cy="50" r="4.5" fill="#1E293B" />
+            <circle cx="65" cy="50" r="4.5" fill="#1E293B" />
+            <circle cx="43" cy="48" r="1.5" fill="#FFFFFF" />
+            <circle cx="67" cy="48" r="1.5" fill="#FFFFFF" />
+            {/* Schnauze & Nase */}
+            <ellipse cx="50" cy="67" rx="14" ry="10" fill="#F4A261" />
+            <ellipse cx="50" cy="63" rx="7" ry="4.5" fill="#3D1D09" />
+            <path d="M 45 71 Q 50 75 55 71" stroke="#3D1D09" strokeWidth="2.5" strokeLinecap="round" fill="none" />
+          </svg>
+        )
+      },
+      {
+        id: 'bluey',
+        name: 'Bluey',
+        tagline: 'Fürchte dich nie!',
+        color: 'from-sky-400 to-blue-600',
+        bgColor: 'bg-sky-100 text-sky-800 border-sky-300',
+        renderIcon: () => (
+          <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-sm">
+            {/* Ohren */}
+            <path d="M 22 45 L 20 18 L 40 30 Z" fill="#2B4C7E" stroke="#1D3557" strokeWidth="2" />
+            <path d="M 78 45 L 80 18 L 60 30 Z" fill="#2B4C7E" stroke="#1D3557" strokeWidth="2" />
+            <path d="M 25 38 L 24 22 L 36 30 Z" fill="#F3D19C" />
+            <path d="M 75 38 L 76 22 L 64 30 Z" fill="#F3D19C" />
+            {/* Kopf-Block */}
+            <rect x="22" y="26" width="56" height="52" rx="18" fill="#5AA9E6" stroke="#2B4C7E" strokeWidth="3" />
+            {/* Fleck um Auge */}
+            <path d="M 22 28 Q 45 28 45 52 L 22 52 Z" fill="#2B4C7E" />
+            {/* Augen */}
+            <circle cx="36" cy="42" r="8" fill="#FFFFFF" />
+            <circle cx="64" cy="42" r="8" fill="#FFFFFF" />
+            <circle cx="38" cy="42" r="4" fill="#1D3557" />
+            <circle cx="62" cy="42" r="4" fill="#1D3557" />
+            {/* Schnauze */}
+            <rect x="34" y="52" width="32" height="24" rx="10" fill="#F3D19C" stroke="#2B4C7E" strokeWidth="2" />
+            <ellipse cx="50" cy="58" rx="6" ry="4" fill="#1D3557" />
+            <path d="M 44 68 Q 50 72 56 68" stroke="#1D3557" strokeWidth="2.5" strokeLinecap="round" fill="none" />
+          </svg>
+        )
+      },
+      {
+        id: 'spidey',
+        name: 'Spidey',
+        tagline: 'Volle Spinnenkraft!',
+        color: 'from-red-500 to-rose-700',
+        bgColor: 'bg-red-100 text-red-800 border-red-300',
+        renderIcon: () => (
+          <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-sm">
+            {/* Maskenkopf */}
+            <ellipse cx="50" cy="50" rx="38" ry="42" fill="#E63946" stroke="#9B1B28" strokeWidth="3" />
+            {/* Spinnennetz-Linien */}
+            <path d="M 50 10 L 50 90 M 14 50 L 86 50 M 24 22 L 76 78 M 76 22 L 24 78" stroke="#9B1B28" strokeWidth="1.5" opacity="0.6" />
+            <circle cx="50" cy="50" r="16" fill="none" stroke="#9B1B28" strokeWidth="1.5" opacity="0.6" />
+            <circle cx="50" cy="50" r="28" fill="none" stroke="#9B1B28" strokeWidth="1.5" opacity="0.6" />
+            {/* Große Spidey-Augen */}
+            <path d="M 20 42 Q 35 34 46 48 Q 36 64 22 56 Z" fill="#FFFFFF" stroke="#1D3557" strokeWidth="3.5" />
+            <path d="M 80 42 Q 65 34 54 48 Q 64 64 78 56 Z" fill="#FFFFFF" stroke="#1D3557" strokeWidth="3.5" />
+          </svg>
+        )
+      },
+      {
+        id: 'paw',
+        name: 'Paw Patrol',
+        tagline: 'Kein Einsatz zu groß!',
+        color: 'from-blue-500 to-indigo-700',
+        bgColor: 'bg-indigo-100 text-indigo-800 border-indigo-300',
+        renderIcon: () => (
+          <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-sm">
+            {/* Schild Wappen */}
+            <path d="M 50 8 L 84 20 L 78 68 L 50 92 L 22 68 L 16 20 Z" fill="#1D4ED8" stroke="#FBBF24" strokeWidth="4" />
+            <path d="M 50 14 L 78 24 L 73 64 L 50 84 L 27 64 L 22 24 Z" fill="#2563EB" />
+            {/* Pfotenabdruck */}
+            <ellipse cx="50" cy="56" rx="14" ry="11" fill="#F8FAFC" />
+            <circle cx="34" cy="40" r="5" fill="#F8FAFC" />
+            <circle cx="45" cy="34" r="5" fill="#F8FAFC" />
+            <circle cx="55" cy="34" r="5" fill="#F8FAFC" />
+            <circle cx="66" cy="40" r="5" fill="#F8FAFC" />
+          </svg>
+        )
+      },
+      {
+        id: 'einhorn',
+        name: 'Glitzer-Einhorn',
+        tagline: 'Magische Lesepower!',
+        color: 'from-fuchsia-400 to-pink-500',
+        bgColor: 'bg-pink-100 text-pink-800 border-pink-300',
+        renderIcon: () => (
+          <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-sm">
+            {/* Mähne Hintergrund */}
+            <path d="M 30 20 Q 15 40 25 70 Q 40 85 60 80" fill="#F472B6" />
+            <path d="M 25 30 Q 10 50 20 75" stroke="#A78BFA" strokeWidth="6" strokeLinecap="round" fill="none" />
+            {/* Kopf */}
+            <ellipse cx="56" cy="52" rx="26" ry="24" fill="#FFFFFF" stroke="#E2E8F0" strokeWidth="2" />
+            <ellipse cx="72" cy="58" rx="12" ry="10" fill="#FFFFFF" stroke="#E2E8F0" strokeWidth="1.5" />
+            {/* Ohr */}
+            <path d="M 45 32 L 40 16 L 54 26 Z" fill="#FFFFFF" stroke="#CBD5E1" strokeWidth="1.5" />
+            <path d="M 46 29 L 43 20 L 51 26 Z" fill="#FBCFE8" />
+            {/* Horn mit Regenbogen-Streifen */}
+            <path d="M 58 32 L 72 4 L 68 30 Z" fill="#FBBF24" stroke="#F59E0B" strokeWidth="1.5" />
+            <path d="M 64 16 L 68 20 M 61 24 L 66 28" stroke="#F43F5E" strokeWidth="2" />
+            {/* Sanftes Auge mit Wimpern */}
+            <path d="M 52 50 Q 58 56 64 50" stroke="#475569" strokeWidth="2.5" strokeLinecap="round" fill="none" />
+            <path d="M 55 52 L 53 56 M 61 52 L 63 56" stroke="#475569" strokeWidth="2" strokeLinecap="round" />
+            <circle cx="76" cy="56" r="2.5" fill="#FB7185" />
+            {/* Glitzerstern */}
+            <path d="M 26 18 L 28 12 L 30 18 L 36 20 L 30 22 L 28 28 L 26 22 L 20 20 Z" fill="#FDE047" />
+          </svg>
+        )
+      }
+    ];
+
+    // =====================================================================
+    // AUDIO-SYNTHESIZER (Web Audio API - keine externen Sound-Dateien nötig)
+    // =====================================================================
+    const playAudioTone = (type) => {
+      try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) return;
+        const ctx = new AudioContext();
+
+        if (type === 'flash') {
+          // Kurzer, unaufdringlicher "Pop/Pling"-Fokus-Ton
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+          osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.08); // A5
+          gain.gain.setValueAtTime(0.08, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.1);
+        } else if (type === 'success') {
+          // Fröhlicher Doppelton (Aufsteigend)
+          const notes = [523.25, 659.25, 783.99]; // C5, E5, G5
+          notes.forEach((freq, idx) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.value = freq;
+            const startTime = ctx.currentTime + idx * 0.07;
+            gain.gain.setValueAtTime(0.1, startTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.18);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(startTime);
+            osc.stop(startTime + 0.18);
+          });
+        } else if (type === 'miss') {
+          // Sanfter, ermutigender Ton
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(320, ctx.currentTime);
+          osc.frequency.linearRampToValueAtTime(260, ctx.currentTime + 0.18);
+          gain.gain.setValueAtTime(0.09, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.2);
+        } else if (type === 'finish') {
+          // Fanfare
+          const fanfare = [523.25, 659.25, 783.99, 1046.5];
+          fanfare.forEach((freq, idx) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.value = freq;
+            const startTime = ctx.currentTime + idx * 0.12;
+            gain.gain.setValueAtTime(0.12, startTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.35);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(startTime);
+            osc.stop(startTime + 0.35);
+          });
+        }
+      } catch (e) {
+        // Audio kann stummgeschaltet sein
+      }
+    };
+
+    // =====================================================================
+    // HAUPTKOMPONENTE
+    // =====================================================================
+    function BlitzlesenApp() {
+      // Screen-Zustände: 'setup' | 'exercise' | 'summary'
+      const [screen, setScreen] = useState('setup');
+
+      // Konfiguration & Einstellungen
+      const [wordListRaw, setWordListRaw] = useState(DEFAULT_WORDS);
+      const [displayDuration, setDisplayDuration] = useState(0.8); // in Sekunden (0.1 bis 3.0)
+      const [fontFamilyMode, setFontFamilyMode] = useState('print'); // 'print' | 'hand'
+      const [fontSizeKey, setFontSizeKey] = useState('L'); // 'S', 'M', 'L', 'XL', 'XXL'
+      const [fixationMode, setFixationMode] = useState('cross'); // 'cross' | 'countdown' | 'dot'
+      const [soundEnabled, setSoundEnabled] = useState(true);
+      const [selectedMascotId, setSelectedMascotId] = useState('maus');
+
+      // Durchlauf-Zustand
+      const [deck, setDeck] = useState([]); // Gemischte Wörter
+      const [currentIndex, setCurrentIndex] = useState(0);
+      const [roundPhase, setRoundPhase] = useState('fixation'); // 'fixation' | 'flashing' | 'rating'
+      const [countdownNum, setCountdownNum] = useState(3);
+      const [results, setResults] = useState([]); // [{ word: 'die', read: true }, ...]
+
+      // Timer-Refs zur sicheren Bereinigung
+      const timerRef = useRef(null);
+      const countdownIntervalRef = useRef(null);
+
+      // Aktuelles Maskottchen finden
+      const currentMascot = useMemo(() => {
+        return MASCOTS.find((m) => m.id === selectedMascotId) || MASCOTS[0];
+      }, [selectedMascotId]);
+
+      // Wörter säubern & parsen (Zeilenumbrüche, Trimmen, Entfernen führender Nummern wie "1 die")
+      const parsedWords = useMemo(() => {
+        return wordListRaw
+          .split('\n')
+          .map((line) => line.trim())
+          .map((line) => line.replace(/^\d+[\s.\-)\t]+/, '').trim()) // Entfernt z.B. "12 " oder "12. "
+          .filter((line) => line.length > 0 && !line.startsWith('<<'));
+      }, [wordListRaw]);
+
+      // Schriftgrößen-Mapping
+      const fontSizeClass = {
+        S: 'text-3xl md:text-4xl',
+        M: 'text-4xl md:text-5xl',
+        L: 'text-6xl md:text-7xl',
+        XL: 'text-7xl md:text-8xl',
+        XXL: 'text-8xl md:text-9xl',
+      }[fontSizeKey] || 'text-6xl md:text-7xl';
+
+      // Handschrift-Styling Fallback
+      const fontStyle = fontFamilyMode === 'hand'
+        ? { fontFamily: '"Comic Neue", "Comic Sans MS", "Caveat", "Indie Flower", "Brush Script MT", cursive' }
+        : { fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif' };
+
+      // Helper zum Aufräumen aller laufenden Timer
+      const clearAllTimers = () => {
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+        if (countdownIntervalRef.current) {
+          clearInterval(countdownIntervalRef.current);
+          countdownIntervalRef.current = null;
+        }
+      };
+
+      // Aufräumen bei Unmount
+      useEffect(() => {
+        return () => clearAllTimers();
+      }, []);
+
+      // Fisher-Yates Shuffle
+      const shuffleArray = (arr) => {
+        const copy = [...arr];
+        for (let i = copy.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [copy[i], copy[j]] = [copy[j], copy[i]];
+        }
+        return copy;
+      };
+
+      // Starte die Übung mit den übergebenen Wörtern
+      const startSession = (wordsToUse) => {
+        const list = wordsToUse && wordsToUse.length > 0 ? wordsToUse : parsedWords;
+        if (list.length === 0) return;
+
+        const shuffled = shuffleArray(list);
+        setDeck(shuffled);
+        setCurrentIndex(0);
+        setResults([]);
+        setScreen('exercise');
+        startRound(shuffled, 0);
+      };
+
+      // Starte eine einzelne Runde (Fixation -> Flash -> Rating)
+      const startRound = (activeDeck, index) => {
+        clearAllTimers();
+
+        if (index >= activeDeck.length) {
+          // Fertig!
+          setScreen('summary');
+          if (soundEnabled) playAudioTone('finish');
+          return;
+        }
+
+        setRoundPhase('fixation');
+
+        if (fixationMode === 'countdown') {
+          let count = 3;
+          setCountdownNum(3);
+          countdownIntervalRef.current = setInterval(() => {
+            count -= 1;
+            if (count > 0) {
+              setCountdownNum(count);
+            } else {
+              clearInterval(countdownIntervalRef.current);
+              countdownIntervalRef.current = null;
+              triggerFlash(activeDeck, index);
+            }
+          }, 350);
+        } else {
+          // Fixationskreuz oder Dot für ca. 750ms
+          timerRef.current = setTimeout(() => {
+            triggerFlash(activeDeck, index);
+          }, 750);
+        }
+      };
+
+      // Wort kurz einblenden und exakt nach displayDuration wieder ausblenden
+      const triggerFlash = (activeDeck, index) => {
+        setRoundPhase('flashing');
+        if (soundEnabled) playAudioTone('flash');
+
+        const durationMs = Math.max(100, Math.round(displayDuration * 1000));
+        timerRef.current = setTimeout(() => {
+          setRoundPhase('rating');
+        }, durationMs);
+      };
+
+      // Bewertung speichern & nächste Runde anstoßen
+      const handleRate = (wasRead) => {
+        if (roundPhase !== 'rating') return;
+
+        if (soundEnabled) {
+          playAudioTone(wasRead ? 'success' : 'miss');
+        }
+
+        const currentWord = deck[currentIndex];
+        const newResults = [...results, { word: currentWord, read: wasRead }];
+        setResults(newResults);
+
+        const nextIdx = currentIndex + 1;
+        setCurrentIndex(nextIdx);
+        startRound(deck, nextIdx);
+      };
+
+      // Übung abbrechen
+      const handleCancelSession = () => {
+        clearAllTimers();
+        setScreen('setup');
+      };
+
+      // Tastatursteuerung
+      useEffect(() => {
+        const handleKeyDown = (e) => {
+          if (screen === 'exercise' && roundPhase === 'rating') {
+            if (e.key === 'ArrowLeft' || e.key === 'j' || e.key === 'J' || e.key === '1' || e.key === 'y') {
+              e.preventDefault();
+              handleRate(true);
+            } else if (e.key === 'ArrowRight' || e.key === 'n' || e.key === 'N' || e.key === '2') {
+              e.preventDefault();
+              handleRate(false);
+            }
+          } else if (screen === 'setup' && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            startSession();
+          } else if (screen === 'exercise' && e.key === 'Escape') {
+            handleCancelSession();
+          }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+      }, [screen, roundPhase, currentIndex, deck, results]);
+
+      // Statistik-Berechnungen
+      const totalCompleted = results.length;
+      const readCount = results.filter((r) => r.read).length;
+      const missedCount = totalCompleted - readCount;
+      const percentage = totalCompleted > 0 ? Math.round((readCount / totalCompleted) * 100) : 0;
+      const missedWordsList = results.filter((r) => !r.read).map((r) => r.word);
+
+      return (
+        <div className="min-h-screen bg-gradient-to-b from-slate-50 via-slate-100 to-slate-200 text-slate-900 font-sans p-4 sm:p-6 md:p-8 flex items-center justify-center select-none antialiased">
+          {/* Zentraler Container (Apple Card Style) */}
+          <div className="w-full max-w-4xl bg-white/90 backdrop-blur-2xl border border-white/60 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.08)] overflow-hidden transition-all duration-300">
+
+            {/* ================================================================= */}
+            {/* HEADER / NAVIGATION BAR                                           */}
+            {/* ================================================================= */}
+            <header className="px-6 py-4 bg-white/50 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-400 to-orange-500 flex items-center justify-center shadow-md shadow-orange-500/20 text-white font-bold text-xl">
+                  ⚡
+                </div>
+                <div>
+                  <h1 className="text-lg font-bold tracking-tight text-slate-900 flex items-center gap-2">
+                    Blitzlesen
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">
+                      Leseflüssigkeit
+                    </span>
+                  </h1>
+                  <p className="text-xs text-slate-500">Schnelles Worterkennen & Blickspanne trainieren</p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                {/* Audio Toggle */}
+                <button
+                  onClick={() => setSoundEnabled(!soundEnabled)}
+                  title={soundEnabled ? 'Ton ausschalten' : 'Ton einschalten'}
+                  className={`p-2 rounded-xl text-xs font-medium border transition-all ${
+                    soundEnabled
+                      ? 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                      : 'bg-slate-50 text-slate-400 border-slate-200 line-through'
+                  }`}
+                >
+                  {soundEnabled ? '🔊 Sound An' : '🔇 Stumm'}
+                </button>
+              </div>
+            </header>
+
+            {/* ================================================================= */}
+            {/* 1. STARTBILDSCHIRM (SETUP)                                        */}
+            {/* ================================================================= */}
+            {screen === 'setup' && (
+              <div className="p-6 md:p-8 space-y-8 animate-fadeIn">
+                {/* Maskottchen-Leiste */}
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
+                    Wähle deinen Begleiter
+                  </label>
+                  <div className="grid grid-cols-5 gap-2 sm:gap-3">
+                    {MASCOTS.map((m) => {
+                      const isSelected = m.id === selectedMascotId;
+                      return (
+                        <button
+                          key={m.id}
+                          onClick={() => setSelectedMascotId(m.id)}
+                          className={`group relative p-3 rounded-2xl border-2 transition-all duration-200 flex flex-col items-center text-center ${
+                            isSelected
+                              ? 'border-orange-500 bg-orange-50/50 shadow-md scale-[1.03]'
+                              : 'border-slate-200/80 bg-white/70 hover:border-slate-300 hover:bg-white'
+                          }`}
+                        >
+                          <div className="w-12 h-12 sm:w-14 sm:h-14 mb-1.5 transition-transform group-hover:scale-110">
+                            {m.renderIcon()}
+                          </div>
+                          <span className="text-xs font-bold text-slate-800 truncate w-full">{m.name}</span>
+                          {isSelected && (
+                            <div className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-orange-500 rounded-full flex items-center justify-center text-white text-[10px] shadow">
+                              ✓
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Einstellungen Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-slate-50/70 p-5 rounded-2xl border border-slate-200/60">
+                  {/* 1. Anzeigedauer */}
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <label className="text-xs font-bold text-slate-700">⏱️ Anzeigedauer</label>
+                      <span className="text-sm font-extrabold px-2.5 py-0.5 rounded-lg bg-orange-500 text-white shadow-sm">
+                        {displayDuration.toFixed(1)} s
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.1"
+                      max="3.0"
+                      step="0.1"
+                      value={displayDuration}
+                      onChange={(e) => setDisplayDuration(parseFloat(e.target.value))}
+                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                    />
+                    <div className="flex justify-between text-[11px] text-slate-400 font-medium">
+                      <span>Blitz (0.1s)</span>
+                      <span>Mittel (1.0s)</span>
+                      <span>Langsam (3.0s)</span>
+                    </div>
+                  </div>
+
+                  {/* 2. Schriftart & Stil */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-700">✍️ Schriftart</label>
+                    <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-200/70 rounded-xl">
+                      <button
+                        onClick={() => setFontFamilyMode('print')}
+                        className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all ${
+                          fontFamilyMode === 'print'
+                            ? 'bg-white text-slate-900 shadow-sm'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        Druckschrift
+                      </button>
+                      <button
+                        onClick={() => setFontFamilyMode('hand')}
+                        className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all ${
+                          fontFamilyMode === 'hand'
+                            ? 'bg-white text-slate-900 shadow-sm'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        Handschrift
+                      </button>
+                    </div>
+                    {fontFamilyMode === 'hand' && (
+                      <p className="text-[10px] text-slate-500 italic">
+                        Hinweis: Nutzt eine flüssige Schreibschrift als Approximation für Schulausgangsschrift.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* 3. Schriftgröße & Fixation */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-700">🔍 Wortgröße</label>
+                    <div className="grid grid-cols-4 gap-1 p-1 bg-slate-200/70 rounded-xl text-center">
+                      {['S', 'M', 'L', 'XL'].map((size) => (
+                        <button
+                          key={size}
+                          onClick={() => setFontSizeKey(size)}
+                          className={`py-1 rounded-lg text-xs font-bold transition-all ${
+                            fontSizeKey === size
+                              ? 'bg-white text-slate-900 shadow-sm'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {size}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-[11px] font-medium text-slate-500">Fixierhilfe:</span>
+                      <select
+                        value={fixationMode}
+                        onChange={(e) => setFixationMode(e.target.value)}
+                        className="text-xs font-semibold bg-white border border-slate-200 rounded-lg px-2 py-1 text-slate-700 focus:outline-none"
+                      >
+                        <option value="cross">Fixationskreuz (+)</option>
+                        <option value="countdown">Countdown (3-2-1)</option>
+                        <option value="dot">Fokus-Punkt (●)</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Wortliste bearbeiten */}
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Wortliste ({parsedWords.length} Wörter bereit)
+                    </label>
+                    {/* Zufalls-Mix: 20 Wörter quer durch alle Listen */}
+                    <button
+                      onClick={() => setWordListRaw(pickRandom(ALL_WORDS_POOL, 20).join('\n'))}
+                      title="Zieht 20 zufällige Wörter aus allen Listen"
+                      className="text-xs px-3 py-1.5 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 text-white font-bold border border-violet-400 shadow-sm transition-all active:scale-[0.98]"
+                    >
+                      🎲 Zufalls-Mix (20 Wörter)
+                    </button>
+                  </div>
+
+                  {/* Schnellauswahl Presets */}
+                  <div className="flex items-center gap-1.5 flex-wrap bg-white/60 border border-slate-200/60 rounded-xl p-2">
+                    <span className="text-[11px] font-semibold text-slate-400 pr-1">Vorlagen:</span>
+                    {PRESETS.map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => setWordListRaw(p.text)}
+                        className="text-xs px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium border border-slate-200 transition-colors"
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="relative">
+                    <textarea
+                      value={wordListRaw}
+                      onChange={(e) => setWordListRaw(e.target.value)}
+                      placeholder="Hier Wörter zeilenweise eingeben..."
+                      rows={6}
+                      className="w-full p-4 rounded-2xl bg-white border border-slate-200 text-slate-800 font-mono text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 shadow-inner resize-y"
+                    />
+                    <div className="absolute bottom-3 right-3 text-[11px] text-slate-400 bg-white/90 px-2 py-0.5 rounded-md border border-slate-100 shadow-sm">
+                      1 Wort pro Zeile • Beliebig editierbar
+                    </div>
+                  </div>
+                </div>
+
+                {/* Großer Apple-Style Start-Button */}
+                <div className="pt-2">
+                  <button
+                    onClick={() => startSession()}
+                    disabled={parsedWords.length === 0}
+                    className={`w-full py-4 px-8 rounded-2xl font-bold text-lg text-white shadow-xl transition-all duration-300 flex items-center justify-center gap-3 ${
+                      parsedWords.length > 0
+                        ? 'bg-gradient-to-r from-orange-500 via-amber-500 to-orange-600 hover:shadow-orange-500/30 hover:scale-[1.01] active:scale-[0.99]'
+                        : 'bg-slate-300 cursor-not-allowed'
+                    }`}
+                  >
+                    <span>⚡ Blitzlesen starten ({parsedWords.length} Wörter)</span>
+                  </button>
+                  <div className="text-center mt-2 text-xs text-slate-400">
+                    Tipp: Nach dem Wortstart kannst du auch die Tastatur nutzen (<kbd className="px-1.5 py-0.5 bg-slate-100 rounded border text-slate-600 font-mono text-[10px]">←</kbd> / <kbd className="px-1.5 py-0.5 bg-slate-100 rounded border text-slate-600 font-mono text-[10px]">J</kbd> = gelesen, <kbd className="px-1.5 py-0.5 bg-slate-100 rounded border text-slate-600 font-mono text-[10px]">→</kbd> / <kbd className="px-1.5 py-0.5 bg-slate-100 rounded border text-slate-600 font-mono text-[10px]">N</kbd> = nicht)
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ================================================================= */}
+            {/* 2. DURCHLAUF / TRAINING (EXERCISE)                                */}
+            {/* ================================================================= */}
+            {screen === 'exercise' && (
+              <div className="p-6 md:p-10 space-y-8 animate-fadeIn">
+                {/* Obere Fortschrittsleiste */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-500">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-xl bg-orange-100 p-0.5">
+                        {currentMascot.renderIcon()}
+                      </div>
+                      <span className="text-slate-800 font-semibold">{currentMascot.name}</span>
+                      <span className="text-slate-300">•</span>
+                      <span>Wort {currentIndex + 1} von {deck.length}</span>
+                    </div>
+                    <button
+                      onClick={handleCancelSession}
+                      className="px-3 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors font-medium text-xs"
+                    >
+                      ✕ Beenden
+                    </button>
+                  </div>
+
+                  {/* Progress Bar */}
+                  <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden p-0.5 border border-slate-200/60">
+                    <div
+                      className="h-full bg-gradient-to-r from-orange-400 to-amber-500 rounded-full transition-all duration-300 ease-out"
+                      style={{ width: `${Math.round(((currentIndex) / deck.length) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Blitz-Display-Zone (Groß & Zentriert) */}
+                <div className="min-h-[300px] sm:min-h-[340px] flex flex-col items-center justify-center bg-slate-50/80 rounded-3xl border-2 border-dashed border-slate-200/80 relative overflow-hidden p-6 shadow-inner">
+
+                  {/* PHASE 1: FIXATION */}
+                  {roundPhase === 'fixation' && (
+                    <div className="flex flex-col items-center justify-center space-y-3 animate-pulse">
+                      {fixationMode === 'countdown' ? (
+                        <div className="text-7xl font-extrabold text-orange-500 font-mono tracking-tight scale-110 transition-transform">
+                          {countdownNum}
+                        </div>
+                      ) : fixationMode === 'dot' ? (
+                        <div className="w-10 h-10 rounded-full bg-orange-500 shadow-lg shadow-orange-500/30" />
+                      ) : (
+                        <div className="text-8xl font-light text-orange-500 leading-none">
+                          +
+                        </div>
+                      )}
+                      <p className="text-xs font-semibold text-slate-400 tracking-wide uppercase">
+                        Blick fixieren...
+                      </p>
+                    </div>
+                  )}
+
+                  {/* PHASE 2: FLASH (Wort sichtbar) */}
+                  {roundPhase === 'flashing' && (
+                    <div className="flex items-center justify-center w-full">
+                      <div
+                        style={fontStyle}
+                        className={`${fontSizeClass} font-extrabold text-slate-900 tracking-tight text-center select-none transform transition-transform scale-100`}
+                      >
+                        {deck[currentIndex]}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* PHASE 3: RATING (Wort ausgeblendet, Selbstbewertung) */}
+                  {roundPhase === 'rating' && (
+                    <div className="flex flex-col items-center justify-center text-center space-y-4 animate-fadeIn">
+                      <div className="w-16 h-16 rounded-full bg-orange-100/80 text-orange-600 flex items-center justify-center text-2xl font-bold shadow-sm">
+                        🗣️
+                      </div>
+                      <div className="space-y-1">
+                        <h3 className="text-2xl font-bold text-slate-800">Laut gesprochen?</h3>
+                        <p className="text-sm text-slate-500">Hast du das Wort richtig erkannt und laut gesagt?</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Blitz-Dauer Badge */}
+                  <div className="absolute bottom-3 right-4 text-[11px] font-mono text-slate-400 bg-white/70 px-2 py-0.5 rounded-full border border-slate-200/50">
+                    Blitz: {displayDuration.toFixed(1)}s
+                  </div>
+                </div>
+
+                {/* Bewertungs-Buttons (Groß & Touch-optimiert) */}
+                <div className="grid grid-cols-2 gap-4 pt-2">
+                  <button
+                    onClick={() => handleRate(true)}
+                    disabled={roundPhase !== 'rating'}
+                    className={`py-5 px-6 rounded-2xl font-bold text-lg transition-all duration-200 flex flex-col sm:flex-row items-center justify-center gap-2 border-2 ${
+                      roundPhase === 'rating'
+                        ? 'bg-emerald-500 hover:bg-emerald-600 text-white border-emerald-400 shadow-lg shadow-emerald-500/25 active:scale-[0.98]'
+                        : 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed'
+                    }`}
+                  >
+                    <span className="text-2xl">✓</span>
+                    <span>Gelesen</span>
+                    <span className="text-xs opacity-75 font-normal hidden sm:inline">(Taste ← / J)</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleRate(false)}
+                    disabled={roundPhase !== 'rating'}
+                    className={`py-5 px-6 rounded-2xl font-bold text-lg transition-all duration-200 flex flex-col sm:flex-row items-center justify-center gap-2 border-2 ${
+                      roundPhase === 'rating'
+                        ? 'bg-rose-500 hover:bg-rose-600 text-white border-rose-400 shadow-lg shadow-rose-500/25 active:scale-[0.98]'
+                        : 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed'
+                    }`}
+                  >
+                    <span className="text-2xl">✗</span>
+                    <span>Nicht gelesen</span>
+                    <span className="text-xs opacity-75 font-normal hidden sm:inline">(Taste → / N)</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ================================================================= */}
+            {/* 3. AUSWERTUNG / ERGEBNIS (SUMMARY)                                */}
+            {/* ================================================================= */}
+            {screen === 'summary' && (
+              <div className="p-6 md:p-10 space-y-8 animate-fadeIn">
+                {/* Header mit Score & Maskottchen */}
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-6 bg-gradient-to-br from-slate-50 to-orange-50/60 p-6 rounded-3xl border border-orange-200/60">
+                  <div className="flex items-center space-x-5">
+                    <div className="w-20 h-20 sm:w-24 sm:h-24 p-2 bg-white rounded-3xl shadow-md border border-slate-100 flex-shrink-0">
+                      {currentMascot.renderIcon()}
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold uppercase tracking-wider text-orange-600 mb-1">
+                        {currentMascot.name} sagt:
+                      </div>
+                      <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
+                        {percentage >= 90
+                          ? '🌟 Blitz-Champion!'
+                          : percentage >= 70
+                          ? '👏 Super Lesetempo!'
+                          : '💪 Gutes Training! Weiter so!'}
+                      </h2>
+                      <p className="text-sm text-slate-600 mt-1">
+                        Du hast {readCount} von {totalCompleted} Wörtern bei {displayDuration.toFixed(1)}s Anzeigedauer blitzschnell gelesen.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Große Prozent-Badge */}
+                  <div className="flex flex-col items-center justify-center px-6 py-4 bg-white rounded-2xl shadow-sm border border-slate-200/80 min-w-[130px]">
+                    <span className="text-4xl sm:text-5xl font-black text-orange-500 tracking-tight">
+                      {percentage}%
+                    </span>
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mt-1">
+                      Erfolgsquote
+                    </span>
+                  </div>
+                </div>
+
+                {/* Listen-Übersicht (Gelesen vs Nicht gelesen) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  {/* Grüne Liste: Gelesen */}
+                  <div className="bg-emerald-50/50 border border-emerald-200/80 rounded-2xl p-5 space-y-3">
+                    <div className="flex items-center justify-between border-b border-emerald-200/60 pb-2">
+                      <h3 className="text-sm font-bold text-emerald-800 flex items-center gap-2">
+                        <span className="w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs">✓</span>
+                        Richtig gelesen ({readCount})
+                      </h3>
+                    </div>
+                    <div className="max-h-56 overflow-y-auto pr-1 flex flex-wrap gap-1.5">
+                      {results
+                        .filter((r) => r.read)
+                        .map((item, idx) => (
+                          <span
+                            key={idx}
+                            className="px-2.5 py-1 bg-white rounded-lg text-xs font-semibold text-emerald-900 border border-emerald-200/60 shadow-xs"
+                          >
+                            {item.word}
+                          </span>
+                        ))}
+                      {readCount === 0 && (
+                        <span className="text-xs text-emerald-600 italic">Keine Wörter in dieser Kategorie.</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Rote Liste: Nicht gelesen / Zum Wiederholen */}
+                  <div className="bg-rose-50/50 border border-rose-200/80 rounded-2xl p-5 space-y-3">
+                    <div className="flex items-center justify-between border-b border-rose-200/60 pb-2">
+                      <h3 className="text-sm font-bold text-rose-800 flex items-center gap-2">
+                        <span className="w-5 h-5 rounded-full bg-rose-500 text-white flex items-center justify-center text-xs">✗</span>
+                        Noch üben ({missedCount})
+                      </h3>
+                    </div>
+                    <div className="max-h-56 overflow-y-auto pr-1 flex flex-wrap gap-1.5">
+                      {results
+                        .filter((r) => !r.read)
+                        .map((item, idx) => (
+                          <span
+                            key={idx}
+                            className="px-2.5 py-1 bg-white rounded-lg text-xs font-semibold text-rose-900 border border-rose-200/60 shadow-xs"
+                          >
+                            {item.word}
+                          </span>
+                        ))}
+                      {missedCount === 0 && (
+                        <span className="text-xs text-emerald-700 font-medium">
+                          Perfekt! Alle Wörter fehlerfrei gelesen! 🎉
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Aktions-Buttons am Ende */}
+                <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                  <button
+                    onClick={() => startSession()}
+                    className="flex-1 py-4 px-6 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-base shadow-lg shadow-orange-500/20 transition-all active:scale-[0.99] flex items-center justify-center gap-2"
+                  >
+                    <span>🔄</span>
+                    <span>Nochmal (Alle Wörter)</span>
+                  </button>
+
+                  {missedCount > 0 && (
+                    <button
+                      onClick={() => startSession(missedWordsList)}
+                      className="flex-1 py-4 px-6 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-base shadow-lg shadow-rose-500/20 transition-all active:scale-[0.99] flex items-center justify-center gap-2"
+                    >
+                      <span>🎯</span>
+                      <span>Nur verpasste üben ({missedCount})</span>
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => setScreen('setup')}
+                    className="py-4 px-6 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-base border border-slate-200 transition-all active:scale-[0.99] flex items-center justify-center gap-2"
+                  >
+                    <span>⚙️</span>
+                    <span>Einstellungen</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+          </div>
+        </div>
+      );
+    }
+
+    // =====================================================================
+    // MOUNT
+    // =====================================================================
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<BlitzlesenApp />);
+  </script>
+</body>
+</html>
